@@ -4,31 +4,64 @@ import pandas as pd
 import openai
 import time
 import os
+import gspread
+from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURATION ---
-
-OPENAI_API_KEY=st.secrets["OPENAI_API_KEY"]
+OPENAI_API_KEY = st.secrets["openai"]["OPENAI_API_KEY"]
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 HOST_SECRET = "letmein"  # Change this to your host password
 
 EXCEL_FILE = "employee_info.xlsx"  # Your Excel file with columns: Name, FunFact, Hobby, CartoonAvatarPath (optional)
 AVATAR_FOLDER = "avatars"          # Folder where cartoon avatars are stored
 
+GOOGLE_SHEET_NAME = "FunFridayMemeGame"  # Your Google Sheet name
+
+# --- GOOGLE SHEETS SETUP ---
+def get_gspread_client():
+    return gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+
+def get_game_state_ws():
+    gc = get_gspread_client()
+    sh = gc.open(GOOGLE_SHEET_NAME)
+    return sh.worksheet("GameState"), sh.worksheet("Leaderboard")
+
+def read_game_state():
+    ws, _ = get_game_state_ws()
+    values = ws.get_all_records()
+    if not values:
+        # Initialize if empty
+        ws.append_row([0, "", "FALSE"])
+        return {"current_index": 0, "current_meme": "", "game_started": False}
+    row = values[0]
+    return {
+        "current_index": int(row.get("current_index", 0)),
+        "current_meme": row.get("current_meme", ""),
+        "game_started": str(row.get("game_started", "FALSE")).upper() == "TRUE"
+    }
+
+def write_game_state(current_index, current_meme, game_started):
+    ws, _ = get_game_state_ws()
+    ws.update("A2", [[current_index, current_meme, str(game_started).upper()]])
+
+def read_leaderboard():
+    _, ws = get_game_state_ws()
+    values = ws.get_all_records()
+    return {row["Name"]: int(row["Score"]) for row in values if row["Name"]}
+
+def write_leaderboard(leaderboard):
+    _, ws = get_game_state_ws()
+    ws.clear()
+    ws.append_row(["Name", "Score"])
+    for name, score in leaderboard.items():
+        ws.append_row([name, score])
+
+# --- AUTOREFRESH EVERY 5 SECONDS ---
+st_autorefresh(interval=5000, key="leaderboardrefresh")
+
 # --- SESSION STATE INITIALIZATION ---
-if "game_started" not in st.session_state:
-    st.session_state.game_started = False
 if "host_mode" not in st.session_state:
     st.session_state.host_mode = False
-if "current_index" not in st.session_state:
-    st.session_state.current_index = 0
-if "leaderboard" not in st.session_state:
-    st.session_state.leaderboard = {}
-if "current_meme" not in st.session_state:
-    st.session_state.current_meme = None
-if "has_guessed_this_round" not in st.session_state:
-    st.session_state.has_guessed_this_round = False
-if "round_start_time" not in st.session_state:
-    st.session_state.round_start_time = None
 if "user_name" not in st.session_state:
     st.session_state.user_name = None
 if "has_registered" not in st.session_state:
@@ -40,7 +73,6 @@ st.title("FunFriday Meme Game")
 @st.cache_data
 def load_employee_data():
     df = pd.read_excel(EXCEL_FILE)
-    # Ensure required columns exist
     for col in ["Name", "FunFact", "Hobby"]:
         if col not in df.columns:
             raise ValueError(f"Missing required column: {col}")
@@ -53,45 +85,6 @@ except Exception as e:
     st.stop()
 
 employee_names = df["Name"].tolist()
-
-# --- HOST CONTROLS ---
-with st.sidebar:
-    st.header("Host Controls")
-    if not st.session_state.host_mode:
-        host_code = st.text_input("Enter host secret to unlock controls", type="password")
-        if st.button("Unlock Host Controls"):
-            if host_code == HOST_SECRET:
-                st.session_state.host_mode = True
-                st.success("Host controls unlocked!")
-            else:
-                st.error("Incorrect secret.")
-    else:
-        if not st.session_state.game_started:
-            if st.button("Start Game"):
-                st.session_state.leaderboard = {name: 0 for name in employee_names}
-                st.session_state.game_started = True
-                st.session_state.current_index = 0
-                st.session_state.current_meme = None
-                st.session_state.has_guessed_this_round = False
-                st.session_state.round_start_time = time.time()
-        else:
-            if st.button("Stop Game"):
-                st.session_state.game_started = False
-        if st.button("Reset Game"):
-            for key in [
-                "game_started", "current_index", "current_meme",
-                "leaderboard", "has_guessed_this_round", "round_start_time"
-            ]:
-                if key in st.session_state:
-                    del st.session_state[key]
-            st.session_state.host_mode = False
-
-    # Leaderboard (Host only)
-    if st.session_state.host_mode:
-        st.subheader("Leaderboard (Top 5)")
-        sorted_leaderboard = sorted(st.session_state.leaderboard.items(), key=lambda x: x[1], reverse=True)[:5]
-        for i, (uname, score) in enumerate(sorted_leaderboard, 1):
-            st.write(f"{i}. {uname}: {score}")
 
 # --- USER REGISTRATION ---
 if not st.session_state.has_registered:
@@ -108,32 +101,68 @@ if not st.session_state.has_registered:
             st.warning("Please enter your name.")
     st.stop()
 else:
-    st.info(f"Welcome, {st.session_state.user_name}! Wait for the host to start the game." if not st.session_state.game_started else "")
+    st.info(f"Welcome, {st.session_state.user_name}! Wait for the host to start the game.")
+
+# --- READ SHARED GAME STATE ---
+game_state = read_game_state()
+leaderboard = read_leaderboard()
+
+# --- HOST CONTROLS ---
+with st.sidebar:
+    st.header("Host Controls")
+    if not st.session_state.host_mode:
+        host_code = st.text_input("Enter host secret to unlock controls", type="password")
+        if st.button("Unlock Host Controls"):
+            if host_code == HOST_SECRET:
+                st.session_state.host_mode = True
+                st.success("Host controls unlocked!")
+            else:
+                st.error("Incorrect secret.")
+    else:
+        if not game_state["game_started"]:
+            if st.button("Start Game"):
+                # Reset leaderboard and game state
+                write_leaderboard({name: 0 for name in employee_names})
+                write_game_state(0, "", True)
+        else:
+            if st.button("Stop Game"):
+                write_game_state(game_state["current_index"], game_state["current_meme"], False)
+        if st.button("Reset Game"):
+            write_leaderboard({name: 0 for name in employee_names})
+            write_game_state(0, "", False)
+            st.session_state.host_mode = False
+
+    # Leaderboard (visible to all)
+    st.markdown("---")
+    st.subheader("Leaderboard (Top 5)")
+    sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)[:5]
+    for i, (uname, score) in enumerate(sorted_leaderboard, 1):
+        st.write(f"{i}. {uname}: {score}")
 
 # --- GAME PHASE ---
-if st.session_state.game_started:
-    idx = st.session_state.current_index
+if game_state["game_started"]:
+    idx = game_state["current_index"]
     if idx >= len(df):
         st.success("Game Over! All employees have had their meme.")
         st.balloons()
-        st.session_state.game_started = False
+        write_game_state(idx, "", False)
         st.stop()
 
     emp = df.iloc[idx]
     meme_prompt = f"Create a funny meme caption about this person: Fun Fact: {emp['FunFact']}, Hobby: {emp['Hobby']}"
 
-    # Generate meme only once per round
-    if st.session_state.current_meme is None:
+    # Generate meme only once per round (by host)
+    if st.session_state.host_mode and not game_state["current_meme"]:
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": meme_prompt}]
         )
-        st.session_state.current_meme = response.choices[0].message.content
-        st.session_state.has_guessed_this_round = False
-        st.session_state.round_start_time = time.time()
+        meme = response.choices[0].message.content
+        write_game_state(idx, meme, True)
+        game_state = read_game_state()  # Refresh after writing
 
     st.header(f"Meme for: ???")
-    st.write(f"**Meme:** {st.session_state.current_meme}")
+    st.write(f"**Meme:** {game_state['current_meme']}")
 
     # Optional: Show cartoon avatar if available
     avatar_path = emp.get("CartoonAvatarPath", "")
@@ -141,31 +170,32 @@ if st.session_state.game_started:
         st.image(avatar_path, caption=f"{emp['Name']}'s Cartoon Avatar", width=200)
 
     # Guessing section
-    if not st.session_state.has_guessed_this_round:
-        guess = st.selectbox("Who is this meme about?", employee_names)
-        if st.button("Submit Guess"):
+    guess_key = f"guess_{idx}_{st.session_state.user_name}"
+    if guess_key not in st.session_state:
+        st.session_state[guess_key] = False
+
+    if not st.session_state[guess_key]:
+        guess = st.selectbox("Who is this meme about?", employee_names, key=f"select_{idx}")
+        if st.button("Submit Guess", key=f"submit_{idx}"):
             if st.session_state.user_name:
                 if guess == emp["Name"]:
                     st.success("Correct!")
-                    st.session_state.leaderboard[st.session_state.user_name] = st.session_state.leaderboard.get(st.session_state.user_name, 0) + 1
+                    leaderboard[st.session_state.user_name] = leaderboard.get(st.session_state.user_name, 0) + 1
+                    write_leaderboard(leaderboard)
                 else:
                     st.error("Wrong! Try again next round.")
-                st.session_state.has_guessed_this_round = True
+                st.session_state[guess_key] = True
             else:
                 st.warning("Please register your name first.")
     else:
         st.info("You have already guessed this round. Wait for the next meme!")
 
-    # Timer
-    time_left = max(0, 120 - int(time.time() - st.session_state.round_start_time))
-    st.info(f"Time left: {time_left} seconds")
-
     # Next meme button (host only)
     if st.session_state.host_mode and st.button("Next Meme"):
-        st.session_state.current_index += 1
-        st.session_state.current_meme = None
-        st.session_state.has_guessed_this_round = False
-        st.session_state.round_start_time = time.time()
+        write_game_state(idx + 1, "", True)
+        # Reset all guess flags for the new round
+        for name in employee_names:
+            st.session_state[f"guess_{idx+1}_{name}"] = False
 
 else:
     if st.session_state.has_registered:

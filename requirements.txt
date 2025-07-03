@@ -3,3 +3,6 @@ openai
 langchain
 faiss-cpu
 openpyxl
+gspread
+streamlit-autorefresh
+google-auth
