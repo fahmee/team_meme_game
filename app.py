@@ -6,10 +6,21 @@ import time
 import os
 import gspread
 from streamlit_autorefresh import st_autorefresh
+import configparser
 
 # --- CONFIGURATION ---
-OPENAI_API_KEY = st.secrets["openai"]["OPENAI_API_KEY"]
+# OPENAI_API_KEY = st.secrets["openai"]["OPENAI_API_KEY"]
+# client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+try:
+    OPENAI_API_KEY = st.secrets["openai"]["OPENAI_API_KEY"]
+except Exception:
+    config = configparser.ConfigParser(interpolation=None)
+    config.read('secrets.ini')
+    OPENAI_API_KEY = config['openai']['OPENAI_API_KEY'].strip('"')
+
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
 HOST_SECRET = "letmein"  # Change this to your host password
 
 EXCEL_FILE = "employee_info.xlsx"  # Your Excel file with columns: Name, FunFact, Hobby, CartoonAvatarPath (optional)
@@ -19,7 +30,27 @@ GOOGLE_SHEET_NAME = "FunFridayMemeGame"  # Your Google Sheet name
 
 # --- GOOGLE SHEETS SETUP ---
 def get_gspread_client():
-    return gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    try:
+        # Try to get credentials from Streamlit secrets (Streamlit Cloud)
+        creds_dict = st.secrets["gcp_service_account"]
+    except Exception:
+        # Fallback: Load from local config file (e.g., secrets.ini)
+        config = configparser.ConfigParser(interpolation=None)
+        config.read('secrets.ini')
+        gcp_creds = config['gcp_service_account']
+        creds_dict = {
+            "type": gcp_creds["type"],
+            "project_id": gcp_creds["project_id"],
+            "private_key_id": gcp_creds["private_key_id"],
+            "private_key": gcp_creds["private_key"].replace('\\n', '\n'),
+            "client_email": gcp_creds["client_email"],
+            "client_id": gcp_creds["client_id"],
+            "auth_uri": gcp_creds["auth_uri"],
+            "token_uri": gcp_creds["token_uri"],
+            "auth_provider_x509_cert_url": gcp_creds["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": gcp_creds["client_x509_cert_url"]
+        }
+    return gspread.service_account_from_dict(creds_dict)
 
 def get_game_state_ws():
     gc = get_gspread_client()
@@ -57,7 +88,7 @@ def write_leaderboard(leaderboard):
         ws.append_row([name, score])
 
 # --- AUTOREFRESH EVERY 5 SECONDS ---
-st_autorefresh(interval=5000, key="leaderboardrefresh")
+st_autorefresh(interval=50000, key="leaderboardrefresh")
 
 # --- SESSION STATE INITIALIZATION ---
 if "host_mode" not in st.session_state:
