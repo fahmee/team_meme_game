@@ -7,3 +7,4 @@ gspread
 streamlit-autorefresh
 google-auth
 configparser
+firebase-admin
