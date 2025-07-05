@@ -47,7 +47,7 @@ def get_firestore_client():
 
 
 if not st.session_state.get("host_mode", False):
-    st_autorefresh(interval=3000, limit=None, key="meme_refresh")
+    st_autorefresh(interval=10000, limit=None, key="meme_refresh")
 
 # --- FIRESTORE SETUP ---
 db = get_firestore_client()
