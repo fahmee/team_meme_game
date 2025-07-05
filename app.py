@@ -10,7 +10,7 @@ from firebase_admin import credentials, firestore
 # --- SECRETS HANDLING ---
 def get_openai_key():
     try:
-        return st.secret['openai']["OPENAI_API_KEY"]
+        return st.secrets['openai']['OPENAI_API_KEY']
     except Exception:
         config = configparser.ConfigParser(interpolation=None)
         config.read('secrets.ini')
