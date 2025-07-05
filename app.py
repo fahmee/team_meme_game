@@ -18,7 +18,7 @@ def get_openai_key():
 
 def get_firestore_client():
     try:
-        creds_dict = st.secrets["firestore_service_account"]
+        creds_dict = dict(st.secrets["firestore_service_account"])
         creds_dict["private_key"] = creds_dict["private_key"].replace('\\n', '\n')
     except Exception:
         config = configparser.ConfigParser(interpolation=None)
