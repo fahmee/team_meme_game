@@ -6,6 +6,7 @@ import openai
 import configparser
 import firebase_admin
 from firebase_admin import credentials, firestore
+from streamlit_autorefresh import st_autorefresh
 
 # --- SECRETS HANDLING ---
 def get_openai_key():
@@ -42,6 +43,11 @@ def get_firestore_client():
         cred = credentials.Certificate(creds_dict)
         firebase_admin.initialize_app(cred)
     return firestore.client()
+
+
+
+if not st.session_state.get("host_mode", False):
+    st_autorefresh(interval=3000, limit=None, key="meme_refresh")
 
 # --- FIRESTORE SETUP ---
 db = get_firestore_client()
@@ -135,13 +141,12 @@ with st.sidebar:
             reset_firestore_state()
             st.session_state.host_mode = False
 
-    # Leaderboard (Host only)
-    if st.session_state.host_mode:
-        st.subheader("Leaderboard (Top 5)")
-        leaderboard = get_leaderboard()
-        sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)[:5]
-        for i, (uname, score) in enumerate(sorted_leaderboard, 1):
-            st.write(f"{i}. {uname}: {score}")
+    # Leaderboard (Visible to everyone in the sidebar)
+    st.subheader("Leaderboard (Top 5)")
+    leaderboard = get_leaderboard()
+    sorted_leaderboard = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)[:5]
+    for i, (uname, score) in enumerate(sorted_leaderboard, 1):
+        st.write(f"{i}. {uname}: {score}")
 
 # --- USER REGISTRATION ---
 if not st.session_state.has_registered:
