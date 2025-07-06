@@ -46,12 +46,12 @@ def get_firestore_client():
 
 
 
-if not st.session_state.get("host_mode", False):
-    st_autorefresh(interval=10000, limit=None, key="meme_refresh")
+# if not st.session_state.get("host_mode", False):
+st_autorefresh(interval=10000, limit=None, key="meme_refresh")
 
-if st.session_state.get("rerun_needed", False):
-    st.session_state.rerun_needed = False
-    st.experimental_rerun()
+# if st.session_state.get("rerun_needed", False):
+#     st.session_state.rerun_needed = False
+#     st.experimental_rerun()
 
 # --- FIRESTORE SETUP ---
 db = get_firestore_client()
@@ -234,7 +234,7 @@ if game_state and game_state.get("game_started", False):
             "current_meme": None,
             "game_started": True
         })
-        st.session_state.rerun_needed = True
+        # st.session_state.rerun_needed = True
 
 else:
     if st.session_state.has_registered:
