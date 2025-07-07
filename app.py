@@ -235,6 +235,6 @@ if game_state and game_state.get("game_started", False):
         })
         st.rerun()
 
-else:
-    if st.session_state.has_registered:
-        st.info("Waiting for host to start the game.")
+# else:
+#     if st.session_state.has_registered:
+#         st.info("Waiting for host to start the game.")
