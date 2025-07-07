@@ -181,20 +181,7 @@ if game_state and game_state.get("game_started", False):
             set_game_state({**game_state, "game_started": False, "game_over": True})
         st.success("🎉 Game over! You survived, so did our code—and you helped us test for free! 😜")
         st.balloons()
-        # Display winners with a trophy emoji
-        # Display winners with a trophy emoji
         
-
-        # Get and sort leaderboard
-        leaderboard = get_leaderboard()
-        top3 = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)[:3]
-
-        # Create a string with name:score format
-        top3_str = ', '.join([f"{name}:{score}" for name, score in top3])
-
-        # Display the top 3 performers
-        st.snow()
-        st.success(f"🏆 Top 3 performers: {top3_str} 🎉") 
         st.stop()
 
     emp = df.iloc[idx]
@@ -226,6 +213,7 @@ if game_state and game_state.get("game_started", False):
         guess = st.selectbox("Who is this image about?", employee_names)
         if st.button("Submit Guess"):
             if st.session_state.user_name:
+                
                 correct = guess == emp["Name"].lower()
                 db.collection("game_state").document("current").collection("guesses").document(st.session_state.user_name).set({
                     "guess": guess,
