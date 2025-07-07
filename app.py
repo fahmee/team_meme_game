@@ -142,9 +142,9 @@ with st.sidebar:
 # --- USER REGISTRATION ---
 if not st.session_state.has_registered:
     st.subheader("Enter Your Name")
-    user_name = st.text_input("Your Name")
+    user_name = st.text_input("Your Name").lower()
     if st.button("Register"):
-        if user_name and user_name.lower() in employee_names:
+        if user_name and user_name in employee_names:
             st.session_state.user_name = user_name
             st.session_state.has_registered = True
             st.success(f"Welcome, {user_name}! Wait for the host to start the game.")
