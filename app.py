@@ -127,6 +127,11 @@ if not st.session_state.registered:
         else:
             st.warning("Please enter a name to register.")
     st.stop()
+else:
+    if st.session_state.host_mode:
+        st.info(f"Welcome, {st.session_state.user_name}!. You are the host. Use the controls in the sidebar to start or manage the game.")
+    else:
+        st.info(f"Welcome, {st.session_state.user_name}! Wait for the host to start the game." if not get_game_state() or not get_game_state().get("game_started", False) else "")
 
 # --- HOST CONTROLS ---
 with st.sidebar:
