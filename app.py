@@ -5,10 +5,10 @@ import pandas as pd
 import configparser
 import firebase_admin
 from firebase_admin import credentials, firestore
-import os
 from PIL import Image
+import random
 
-# --- SECRETS HANDLING ---
+# --- FIRESTORE SETUP ---
 def get_firestore_client():
     try:
         creds_dict = dict(st.secrets["firestore_service_account"])
@@ -35,7 +35,6 @@ def get_firestore_client():
         firebase_admin.initialize_app(cred)
     return firestore.client()
 
-# --- FIRESTORE SETUP ---
 db = get_firestore_client()
 
 # --- CONFIGURATION ---
@@ -43,14 +42,14 @@ HOST_SECRET = "123"
 EXCEL_FILE = "employee_info1.xlsx"
 
 # --- SESSION STATE INITIALIZATION ---
+if "registered" not in st.session_state:
+    st.session_state.registered = False
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
 if "game_started" not in st.session_state:
     st.session_state.game_started = False
 if "host_mode" not in st.session_state:
     st.session_state.host_mode = False
-if "user_name" not in st.session_state:
-    st.session_state.user_name = None
-if "has_registered" not in st.session_state:
-    st.session_state.has_registered = False
 
 st.title("FunFriday Meme Game")
 
@@ -69,8 +68,7 @@ except Exception as e:
     st.error(f"Error loading employee data: {e}")
     st.stop()
 
-# employee_names = df["Name"].tolist()
-employee_names=[name.lower() for name in df["Name"].tolist()]
+employee_names_original = df["Name"].tolist()
 
 # --- FIRESTORE HELPERS ---
 def get_game_state():
@@ -82,11 +80,10 @@ def set_game_state(state):
 
 def get_leaderboard():
     docs = db.collection("leaderboard").stream()
-    return {doc.id: doc.to_dict()["score"] for doc in docs}
+    return {doc.id: doc.to_dict().get("score", 0) for doc in docs}
 
-def set_leaderboard(leaderboard):
-    for name, score in leaderboard.items():
-        db.collection("leaderboard").document(name).set({"Name": name, "score": score})
+def set_leaderboard_entry(name, score=0):
+    db.collection("leaderboard").document(name).set({"Name": name, "score": score})
 
 def reset_firestore_state():
     db.collection("game_state").document("current").set({
@@ -95,8 +92,41 @@ def reset_firestore_state():
         "game_started": False,
         "game_over": False
     })
-    for name in employee_names:
-        db.collection("leaderboard").document(name).set({"Name": name, "score": 0})
+
+def reset_leaderboard():
+    leaderboard_ref = db.collection("leaderboard")
+    for doc in leaderboard_ref.stream():
+        doc.reference.delete()
+
+def reset_guesses():
+    guesses_ref = db.collection("game_state").document("current").collection("guesses")
+    for doc in guesses_ref.stream():
+        doc.reference.delete()
+
+# leaderboard = get_leaderboard()
+# if (st.session_state.get("registered", False)
+#     and st.session_state.get("user_name") not in leaderboard
+# ):
+#     st.session_state.registered = False
+#     st.session_state.user_name = None
+
+# --- REGISTRATION (REQUIRED) ---
+if not st.session_state.registered:
+    st.subheader("Register to Play")
+    reg_name = st.text_input("Enter your name (this will appear on the leaderboard):", key="reg_input")
+    if st.button("Register"):
+        if reg_name and reg_name.strip():
+            st.session_state.user_name = reg_name.strip()
+            st.session_state.registered = True
+            # Add to leaderboard if not already present
+            leaderboard = get_leaderboard()
+            if reg_name.strip() not in leaderboard:
+                set_leaderboard_entry(reg_name.strip(), 0)
+            st.success(f"Welcome, {reg_name.strip()}! You are now registered and can play.")
+            st.rerun()
+        else:
+            st.warning("Please enter a name to register.")
+    st.stop()
 
 # --- HOST CONTROLS ---
 with st.sidebar:
@@ -115,13 +145,14 @@ with st.sidebar:
         if not game_state or not game_state.get("game_started", False):
             if st.button("Start Game"):
                 reset_firestore_state()
+                reset_guesses()
                 set_game_state({
                     "current_index": 0,
                     "current_meme": None,
                     "game_started": True,
                     "game_over": False
                 })
-                set_leaderboard({name: 0 for name in employee_names})
+                reset_leaderboard()
                 st.rerun()
         else:
             if st.button("Stop Game"):
@@ -129,6 +160,8 @@ with st.sidebar:
                 st.rerun()
         if st.button("Reset Game"):
             reset_firestore_state()
+            reset_leaderboard()
+            reset_guesses()
             st.session_state.host_mode = False
             st.rerun()
 
@@ -139,36 +172,13 @@ with st.sidebar:
     for i, (uname, score) in enumerate(sorted_leaderboard, 1):
         st.write(f"{i}. {uname}: {score}")
 
-# --- USER REGISTRATION ---
-if not st.session_state.has_registered:
-    st.subheader("Enter Your Name")
-    user_name = st.text_input("Your Name").lower()
-    if st.button("Register"):
-        if user_name and user_name in employee_names:
-            st.session_state.user_name = user_name
-            st.session_state.has_registered = True
-            st.success(f"Welcome, {user_name}! Wait for the host to start the game.")
-            st.rerun()
-        elif user_name:
-            st.warning("Name not found in employee list.")
-        else:
-            st.warning("Please enter your name.")
-    st.stop()
-else:
-    if st.session_state.host_mode:
-        st.info(f"Welcome, {st.session_state.user_name}!. You are the host. Use the controls in the sidebar to start or manage the game.")
-    else:
-        st.info(f"Welcome, {st.session_state.user_name}! Wait for the host to start the game." if not get_game_state() or not get_game_state().get("game_started", False) else "")
-
 # --- GAME PHASE ---
 game_state = get_game_state()
 
-# --- Teammate Refresh Button ---
 if not st.session_state.host_mode:
     if st.button("Refresh"):
         st.rerun()
 
-# --- Show Game Over Message to Everyone ---
 if game_state and game_state.get("game_over", False):
     st.success("Game Over! All employees have had their meme.")
     st.balloons()
@@ -179,22 +189,18 @@ if game_state and game_state.get("game_started", False):
     if idx >= len(df):
         if not game_state.get("game_over", False):
             set_game_state({**game_state, "game_started": False, "game_over": True})
-        st.success("🎉 Game over! You survived, so did our code—and you helped us test for free! 😜")
+        st.success("🎉 Game over! Thanks for playing!")
         st.balloons()
-        
         st.stop()
 
     emp = df.iloc[idx]
     image_url = emp["Image URL"]
-
+    correct_name_original = emp["Name"]
+    correct_name_lower = correct_name_original.lower()
     img = Image.open(image_url)
-
-    # Set desired width
     desired_width = 400
     aspect_ratio = img.height / img.width
     new_height = int(desired_width * aspect_ratio)
-
-    # Resize image
     resized_img = img.resize((desired_width, new_height))
 
     # Store the image URL in Firestore for the current round
@@ -205,38 +211,44 @@ if game_state and game_state.get("game_started", False):
     st.header("Guess Who?")
     st.image(resized_img, use_container_width=False)
 
-    # Guessing section
+    # --- Dropdown with 8 random names including correct one, stable per round ---
+    if "dropdown_names" not in st.session_state or st.session_state.get("dropdown_round") != idx:
+        other_names = [name for name in employee_names_original if name.lower() != correct_name_lower]
+        dropdown_names = random.sample(other_names, 7) if len(other_names) >= 7 else other_names
+        dropdown_names.append(correct_name_original)
+        random.shuffle(dropdown_names)
+        st.session_state.dropdown_names = dropdown_names
+        st.session_state.dropdown_round = idx
+
+    guess = st.selectbox("Who is this image about?", st.session_state.dropdown_names, key="guess_selectbox")
+
+    user_key = st.session_state.user_name
+    user_has_guessed = db.collection("game_state").document("current").collection("guesses").document(user_key).get().exists
+
     leaderboard = get_leaderboard()
-    user_has_guessed = db.collection("game_state").document("current").collection("guesses").document(st.session_state.user_name).get().exists
 
     if not user_has_guessed:
-        guess = st.selectbox("Who is this image about?", employee_names)
         if st.button("Submit Guess"):
-            if st.session_state.user_name:
-                
-                correct = guess == emp["Name"].lower()
-                db.collection("game_state").document("current").collection("guesses").document(st.session_state.user_name).set({
-                    "guess": guess,
-                    "correct": correct
-                })
-                if correct:
-                    leaderboard[st.session_state.user_name] = leaderboard.get(st.session_state.user_name, 0) + 1
-                    set_leaderboard(leaderboard)
-                    st.success("Correct!")
-                else:
-                    st.error("Wrong! Try again next round.")
-                st.rerun()
+            correct = guess.strip().lower() == correct_name_lower.strip()
+            db.collection("game_state").document("current").collection("guesses").document(user_key).set({
+                "guess": guess,
+                "correct": correct
+            })
+            if correct:
+                # Update leaderboard
+                current_score = leaderboard.get(user_key, 0) + 1
+                set_leaderboard_entry(user_key, current_score)
+                st.success("Correct!")
             else:
-                st.warning("Please register your name first.")
+                st.error("Wrong! Try again next round.")
+            st.rerun()
     else:
         st.info("You have already guessed this round. Wait for the next image!")
 
     # Next image button (host only, updates for all)
     if st.session_state.host_mode and st.button("Next Image"):
         # Clear guesses for next round
-        guesses_ref = db.collection("game_state").document("current").collection("guesses")
-        for doc in guesses_ref.stream():
-            doc.reference.delete()
+        reset_guesses()
         set_game_state({
             "current_index": idx + 1,
             "current_meme": None,
