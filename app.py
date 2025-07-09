@@ -194,7 +194,7 @@ if game_state and game_state.get("game_started", False):
     if idx >= len(df):
         if not game_state.get("game_over", False):
             set_game_state({**game_state, "game_started": False, "game_over": True})
-        st.success("🎉 Game over! Thanks for playing!")
+        st.success("🎉 Game over! You survived, so did our code—and you helped us test for free! 😜")
         st.balloons()
         st.stop()
 
